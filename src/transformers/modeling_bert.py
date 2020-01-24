@@ -1484,7 +1484,7 @@ class BertForImg2Txt(BertPreTrainedModel):
         self.bert = BertModel(config)
         # TODO: do we need these? self.bert.embeddings.word_embeddings.weight, num_labels=num_labels
         self.cls = BertPreTrainingHeads(config)
-        self.apply(self.init_bert_weights)
+        # self.apply(self.init_bert_weights)
         self.crit_mask_lm = nn.CrossEntropyLoss(reduction='none')
         self.mask_word_id = mask_word_id
         self.num_labels = num_labels

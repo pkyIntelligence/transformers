@@ -532,7 +532,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin):
                     )
                 )
             if len(error_msgs) > 0:
-                raise RuntimeError(
+                logger.info(
                     "Error(s) in loading state_dict for {}:\n\t{}".format(
                         model.__class__.__name__, "\n\t".join(error_msgs)
                     )
