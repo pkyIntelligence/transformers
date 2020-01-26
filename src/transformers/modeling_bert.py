@@ -1723,8 +1723,80 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
 
 
-class BertForImg2Txt(BertPreTrainedModel):
+""" for VLP, based on UniLM, for training """
+class BertForPreTrainingLossMask(BertPreTrainedModel):
     """refer to BertForPreTraining"""
+
+    def __init__(self, config, num_labels=2, len_vis_input=49, tasks='img2txt'):
+        super(BertForPreTrainingLossMask, self).__init__(config)
+        self.bert = BertModel(config)
+        self.cls = BertPreTrainingHeadsIncr(
+            config, self.bert.embeddings.word_embeddings.weight, num_labels=num_labels) # num_labels not applicable for VLP
+        self.crit_mask_lm = nn.CrossEntropyLoss(reduction='none')
+        self.num_labels = num_labels
+        self.len_vis_input = len_vis_input
+
+        # will not be initialized when loading BERT weights
+        self.vis_embed = nn.Sequential(nn.Linear(1024, 1024),
+                                   nn.ReLU(),
+                                   nn.Linear(1024, config.hidden_size),
+                                   nn.ReLU(),
+                                   nn.Dropout(config.hidden_dropout_prob)) # use to be 0.3
+
+        self.vis_pe_embed = nn.Sequential(nn.Linear(5+81, config.hidden_size),
+                                   nn.ReLU(),
+                                   nn.Dropout(config.hidden_dropout_prob))
+
+        self.tasks = tasks
+
+    def forward(self, vis_feats, vis_pe, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None,
+                ans_labels=None, next_sentence_label=None, masked_pos=None, masked_weights=None, task_idx=None,
+                vis_masked_pos=[], drop_worst_ratio=0.2, vqa_inference=False):
+
+        vis_feats = self.vis_embed(vis_feats)  # image region features
+        vis_pe = self.vis_pe_embed(vis_pe)  # image region positional encodings
+
+        sequence_output, pooled_output = self.bert(vis_feats, vis_pe, input_ids, token_type_ids,
+            attention_mask, output_all_encoded_layers=False, len_vis_input=self.len_vis_input)
+
+        def gather_seq_out_by_pos(seq, pos):
+            return torch.gather(seq, 1, pos.unsqueeze(2).expand(-1, -1, seq.size(-1)))
+
+        def loss_mask_and_normalize(loss, mask, drop_worst_ratio):
+            mask = mask.type_as(loss)
+            loss = loss * mask
+
+            # Ruotian Luo's drop worst
+            keep_loss, keep_ind = torch.topk(loss.sum(-1), int(loss.size(0)*(1-drop_worst_ratio)), largest=False)
+
+            # denominator = torch.sum(mask) + 1e-5
+            # return (loss / denominator).sum()
+            denominator = torch.sum(mask.sum(-1)[keep_ind]) + 1e-5
+            return (keep_loss / denominator).sum()
+
+        # masked lm
+        if masked_pos.numel() == 0:
+            # hack to avoid empty masked_pos during training for now
+            masked_lm_loss = pooled_output.new(1).fill_(0)
+        else:
+            sequence_output_masked = gather_seq_out_by_pos(
+                sequence_output, masked_pos)
+            prediction_scores_masked, _ = self.cls(
+                sequence_output_masked, pooled_output, task_idx=task_idx)
+            masked_lm_loss = self.crit_mask_lm(
+                prediction_scores_masked.transpose(1, 2).float(), masked_lm_labels)
+            masked_lm_loss = loss_mask_and_normalize(
+                masked_lm_loss.float(), masked_weights, drop_worst_ratio)
+
+        vis_pretext_loss = masked_lm_loss.new(1).fill_(0)
+
+        return masked_lm_loss, vis_pretext_loss, masked_lm_loss.new(1).fill_(0)
+
+
+class BertForImg2Txt(BertPreTrainedModel):
+    """refer to BertForPreTraining
+        Used for caption inference
+    """
 
     def __init__(self, config, mask_word_id=0, num_labels=2,
                  search_beam_size=1, length_penalty=1.0, eos_id=0,
