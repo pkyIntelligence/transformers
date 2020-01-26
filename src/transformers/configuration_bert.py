@@ -123,6 +123,9 @@ class BertConfig(PretrainedConfig):
         type_vocab_size=2,
         initializer_range=0.02,
         layer_norm_eps=1e-12,
+        task_idx=None,
+        fp32_embedding=False,
+        label_smoothing=None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -139,3 +142,6 @@ class BertConfig(PretrainedConfig):
         self.type_vocab_size = type_vocab_size
         self.initializer_range = initializer_range
         self.layer_norm_eps = layer_norm_eps
+        self.task_idx = task_idx
+        self.fp32_embedding = fp32_embedding
+        self.label_smoothing = label_smoothing
