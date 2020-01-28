@@ -1023,6 +1023,51 @@ class BertModel(BertPreTrainedModel):
         return outputs  # sequence_output, pooled_output, (hidden_states), (attentions)
 
 
+class BertModelImgInp(BertModel):
+    def get_extended_attention_mask(self, input_ids, token_type_ids, attention_mask):
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids)
+        if token_type_ids is None:
+            token_type_ids = torch.zeros_like(input_ids)
+
+        # We create a 3D attention mask from a 2D tensor mask.
+        # Sizes are [batch_size, 1, 1, to_seq_length]
+        # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
+        # this attention mask is more simple than the triangular masking of causal attention
+        # used in OpenAI GPT, we just need to prepare the broadcast dimension here.
+        if attention_mask.dim() == 2:
+            extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        elif attention_mask.dim() == 3:
+            extended_attention_mask = attention_mask.unsqueeze(1)
+        else:
+            raise NotImplementedError
+
+        # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
+        # masked positions, this operation will create a tensor which is 0.0 for
+        # positions we want to attend and -10000.0 for masked positions.
+        # Since we are adding it to the raw scores before the softmax, this is
+        # effectively the same as removing these entirely.
+        extended_attention_mask = extended_attention_mask.to(
+            dtype=next(self.parameters()).dtype)  # fp16 compatibility
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+        return extended_attention_mask
+
+    def forward(self, vis_feats, vis_pe, input_ids, token_type_ids=None, attention_mask=None, output_all_encoded_layers=True, len_vis_input=49):
+        extended_attention_mask = self.get_extended_attention_mask(
+            input_ids, token_type_ids, attention_mask)
+
+        # hack to load vis feats
+        embedding_output = self.embeddings(vis_feats, vis_pe, input_ids, token_type_ids, len_vis_input=len_vis_input)
+        encoded_layers = self.encoder(embedding_output,
+                                      extended_attention_mask,
+                                      output_all_encoded_layers=output_all_encoded_layers)
+        sequence_output = encoded_layers[-1]
+        pooled_output = self.pooler(sequence_output)
+        if not output_all_encoded_layers:
+            encoded_layers = encoded_layers[-1]
+        return encoded_layers, pooled_output
+
+
 class BertModelIncr(BertModel):
     def __init__(self, config):
         super().__init__(config)
@@ -1729,7 +1774,7 @@ class BertForPreTrainingLossMask(BertPreTrainedModel):
 
     def __init__(self, config, num_labels=2, len_vis_input=49, tasks='img2txt'):
         super(BertForPreTrainingLossMask, self).__init__(config)
-        self.bert = BertModel(config)
+        self.bert = BertModelImgInp(config)
         self.cls = BertPreTrainingHeadsIncr(
             config, self.bert.embeddings.word_embeddings.weight, num_labels=num_labels) # num_labels not applicable for VLP
         self.crit_mask_lm = nn.CrossEntropyLoss(reduction='none')
