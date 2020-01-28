@@ -1750,8 +1750,7 @@ class BertForPreTrainingLossMask(BertPreTrainedModel):
         self.tasks = tasks
 
     def forward(self, vis_feats, vis_pe, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None,
-                ans_labels=None, next_sentence_label=None, masked_pos=None, masked_weights=None, task_idx=None,
-                vis_masked_pos=[], drop_worst_ratio=0.2, vqa_inference=False):
+                masked_pos=None, masked_weights=None, task_idx=None, drop_worst_ratio=0.2):
 
         vis_feats = self.vis_embed(vis_feats)  # image region features
         vis_pe = self.vis_pe_embed(vis_pe)  # image region positional encodings
@@ -1788,9 +1787,7 @@ class BertForPreTrainingLossMask(BertPreTrainedModel):
             masked_lm_loss = loss_mask_and_normalize(
                 masked_lm_loss.float(), masked_weights, drop_worst_ratio)
 
-        vis_pretext_loss = masked_lm_loss.new(1).fill_(0)
-
-        return masked_lm_loss, vis_pretext_loss, masked_lm_loss.new(1).fill_(0)
+        return masked_lm_loss
 
 
 class BertForImg2Txt(BertPreTrainedModel):
